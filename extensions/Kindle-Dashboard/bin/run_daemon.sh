@@ -1,9 +1,11 @@
 #!/bin/sh
 
-# ================= Fix 1: 免疫死亡信号 =================
-# 1 = SIGHUP (挂起), 15 = SIGTERM (终止)
-# 这行命令让脚本在这个信号到来时"什么都不做"，从而存活下来
-trap "" 1 15
+# Managed by session.sh: it owns input and native UI restoration.
+trap 'exit 0' INT TERM
+if [ ! -d /tmp/kindle-dashboard-session ]; then
+    echo 'Launch via boot.sh, not run_daemon.sh' >&2
+    exit 1
+fi
 
 # ================= 配置 =================
 IMG_URL="https://i.tsk.im/file/1769588501760_test_output_dashboard.png"
@@ -22,17 +24,24 @@ SAFETY_LOCK="/mnt/us/STOP_DASH"
 PING_TARGET="223.5.5.5" 
 ROTATE=3
 
-# =============== [新增] 本地时钟配置 ===============
+# =============== 本地时钟配置（800×600 横屏学习看板） ===============
 ENABLE_LOCAL_CLOCK=1
-# 坐标需根据图片留白位置调整 (Kindle Oasis 2 分辨率 1680x1264)
-# 假设你在左上角留了白
-CLOCK_X=40
-CLOCK_Y=295
-CLOCK_SIZE=80
+# 坐标以旋转后的屏幕左上角为原点，匹配服务端 .clock。
+# px 是字体行高（像素）；不要用 size（磅），否则会随 Kindle DPI 放大。
+# IBM Plex Mono 的行高约为 em 的 1.3 倍，78px 对应网页约 60px 字号。
+CLOCK_X=24
+CLOCK_Y=51
+CLOCK_SIZE=78
+# 清除整个旧时间，包括服务端 PNG 中的时间；不碰顶部横线、星期和天气。
+CLOCK_CLEAR_Y=52
+CLOCK_WIDTH=184
+CLOCK_HEIGHT=76
+CLOCK_RIGHT=592
+CLOCK_BOTTOM=469
 # 字体路径 (可选，留空则使用 fbink 默认)
 CLOCK_FONT="${BASE_DIR}/IBMPlexMono-SemiBold.ttf"
 # 时间格式: 12 或 24
-TIME_FORMAT=12
+TIME_FORMAT=24
 
 # [新增] 连续失败计数器
 FAIL_COUNT=0
@@ -41,48 +50,9 @@ MAX_FAIL_COUNT=6
 
 # =================================================
 
-echo "[Daemon] Started with PID $$ (Trapped)" > "$LOG"
-
-# 1. 停止 Framework
-echo "[Daemon] Stopping framework..." >> "$LOG"
-stop framework
-sleep 2
-
-# 2. 疯狂猎杀
-echo "[Daemon] Hunting processes..." >> "$LOG"
-
-kill_process_by_keyword() {
-    PIDS=$(ps aux | grep "$1" | grep -v grep | awk '{print $2}')
-    if [ -n "$PIDS" ]; then
-        echo " -> Killing $1 (PIDs: $PIDS)" >> "$LOG"
-        for pid in $PIDS; do
-            kill -9 $pid
-        done
-    fi
-}
-
-for i in 1 2 3 4 5; do
-    killall cvm
-    killall KPPMainAppV2
-    killall mesquite
-    killall awesome
-    
-    # Fix 2: 杀掉高 CPU/IO 进程
-    killall gzip 
-    killall tar
-    
-    kill_process_by_keyword "dump-stack"
-    kill_process_by_keyword "dmcc.sh"
-    kill_process_by_keyword "sleep 180"
-    
-    $FBINK_CMD -k -f -q
-    sleep 1
-done
-
-echo "[Daemon] Cleanup done. Loop starting..." >> "$LOG"
-
-# 3. 保持唤醒
+echo "[Daemon] Worker started, PID $$" >> "$LOG"
 lipc-set-prop com.lab126.powerd preventScreenSaver 1
+sleep 2
 
 # 计数器初始化
 COUNT=0
@@ -122,9 +92,8 @@ while true; do
         # $FBINK_CMD -q -x 0 -y 0 "WiFi Lost $FAIL_COUNT"
 
         if [ $FAIL_COUNT -ge $MAX_FAIL_COUNT ]; then
-            echo "[Fatal] Network dead for too long. Rebooting device..." >> "$LOG"
-            # 绝杀：如果网络挂了1小时，直接重启系统以重置网卡驱动状态
-            reboot
+            echo "[Fatal] Network unavailable; returning to native UI." >> "$LOG"
+            exit 1
         fi
 
         # --- 第一阶段：尝试温和重连 (L2 Reconnect) ---
@@ -202,8 +171,15 @@ while true; do
             TIME_STR=$(date "+%H:%M")
         fi
         
-        # 绘制时间，空格保证无残留
-        $FBINK_CMD -q -t "regular=$CLOCK_FONT,size=$CLOCK_SIZE,left=$CLOCK_X,top=$CLOCK_Y" "$TIME_STR "
+        # 先在内存中擦除旧时钟，再绘制，最后一次性局刷整个区域。
+        # 不追加空格：在限定宽度内，尾部空格可能导致换行。
+        if [ -f "$CLOCK_FONT" ]; then
+            "$FBINK_CMD" -q -b -k "left=$CLOCK_X,top=$CLOCK_CLEAR_Y,width=$CLOCK_WIDTH,height=$CLOCK_HEIGHT" &&
+            "$FBINK_CMD" -q -b -t "regular=$CLOCK_FONT,px=$CLOCK_SIZE,left=$CLOCK_X,top=$CLOCK_Y,right=$CLOCK_RIGHT,bottom=$CLOCK_BOTTOM" "$TIME_STR"
+            "$FBINK_CMD" -q -W gl16 -s "left=$CLOCK_X,top=$CLOCK_CLEAR_Y,width=$CLOCK_WIDTH,height=$CLOCK_HEIGHT"
+        else
+            echo "[Clock] Missing font: $CLOCK_FONT; keeping server clock." >> "$LOG"
+        fi
     fi
     # =====================================================
 

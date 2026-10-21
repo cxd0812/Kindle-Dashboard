@@ -1,11 +1,13 @@
 #!/bin/sh
 
+trap '' HUP
+
 LOG="/tmp/dashboard.log"
 echo "========================================" > "$LOG"
 echo "[Boot-1] Triggered at $(date)" >> "$LOG"
 
 BASE_DIR="/mnt/us/extensions/Kindle-Dashboard"
-DAEMON="$BASE_DIR/bin/run_daemon.sh"
+DAEMON="$BASE_DIR/bin/session.sh"
 
 if [ ! -f "$DAEMON" ]; then
     echo "[Boot-Error] Daemon script not found!" >> "$LOG"
@@ -22,7 +24,8 @@ echo "[Boot-2] Preparing to detach..." >> "$LOG"
         
         echo "[Boot-4] Launching daemon: $DAEMON" >> "$LOG"
         # 使用 exec 替换当前 shell，节省资源
-        exec /bin/sh "$DAEMON" >> "$LOG" 2>&1
+        # A separate session also isolates us from the KUAL/framework process group.
+        exec setsid /bin/sh "$DAEMON" >> "$LOG" 2>&1
     ) &
 )
 

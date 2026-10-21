@@ -84,7 +84,9 @@ CLOCK_SIZE=80
 **Verified Device**: This project has been tested on **Kindle Oasis 2** and **Kindle Paperwhite 3**. Please note that **Kindle Paperwhite 3** has different rotation parameters, 2 is landscape.
 
 **How to Exit?**
-Since the script kills the native Framework (`stop framework`), you need to **long-press the Kindle power button** to restart the device and restore normal reading mode.
+Hold one finger still anywhere on the screen for at least **3 seconds, then release**. Dashboard stops its workers, restores display/power settings, and restarts the native framework without rebooting. The firmware may return to the home screen rather than directly to the previous book. Touch input is checked before stopping the native UI.
+
+This modification targets Kindle 7 / firmware 5.12.2.2.2 and still needs testing on the physical device. See [installation and troubleshooting notes (Chinese)](退出手势说明.md). When upgrading from the original version, reboot once to stop the old process, then replace the whole extension directory and launch it again from KUAL.
 
 ## 🖼️ Image Conversion Tool
 
